@@ -4,7 +4,6 @@ import os
 import json
 from io import BytesIO
 from xhtml2pdf import pisa
-from pathlib import Path
 
 st.set_page_config(page_title="Persona Builder Card", layout="centered")
 
@@ -64,6 +63,7 @@ st.markdown(f"""
 
 st.title("🧬 Persona Builder Card")
 
+# Load database if exists
 DB_FILE = "persona_db.json"
 if os.path.exists(DB_FILE):
     with open(DB_FILE, "r") as f:
@@ -71,14 +71,72 @@ if os.path.exists(DB_FILE):
 else:
     persona_db = {}
 
+# PDF converter function
+def convert_html_to_pdf(source_html):
+    result = BytesIO()
+    pisa_status = pisa.CreatePDF(source_html, dest=result)
+    if not pisa_status.err:
+        return result.getvalue()
+    return None
+
 # Search existing personas
-st.sidebar.markdown("### 🔍 Cari Character")
-search_query = st.sidebar.text_input("Masukkan nama")
-if search_query:
+with st.sidebar.form("search_form"):
+    st.markdown("### 🔍 Cari Character")
+    search_query = st.text_input("Masukkan Nama Fan Dalam App")
+    search_submit = st.form_submit_button("Cari")
+
+if search_submit:
     match = persona_db.get(search_query)
     if match:
         st.sidebar.success("Character ditemukan!")
-        st.sidebar.json(match)
+        st.subheader("🪪 Persona Card")
+
+        col1, col2 = st.columns([1, 2])
+        image_path = f"temp_{search_query}.png"
+        if os.path.exists(image_path):
+            image = Image.open(image_path)
+            col1.image(image, width=200)
+        else:
+            col1.image("https://via.placeholder.com/200", width=200)
+
+        html_card = f"""
+        <div class='card'>
+        <h2>{match['name']}</h2>
+        <p><strong>Fan Name (App):</strong> {search_query}</p>
+        <p><strong>Usia:</strong> {match['age']}</p>
+        <p><strong>Occupation:</strong> {match['occupation']}</p>
+        <p><strong>Race:</strong> {match['race']}</p>
+        <p><strong>Nationality:</strong> {match['nationality']}</p>
+        <p><strong>Strength:</strong> {match['strength']}</p>
+        <p><strong>Weakness:</strong> {match['weakness']}</p>
+        <p><strong>Kondisi Psikologi:</strong> {match['psychology']}</p>
+        <p><strong>Hobby:</strong> {match['hobby']}</p>
+        <p><strong>Keluarga (Siblings):</strong> {match['siblings']}</p>
+        </div>
+        """
+        col2.markdown(html_card, unsafe_allow_html=True)
+
+        pdf_html = f"""
+        <h1>{match['name']}</h1>
+        <p><strong>Fan Name:</strong> {search_query}</p>
+        <p><strong>Age:</strong> {match['age']}</p>
+        <p><strong>Occupation:</strong> {match['occupation']}</p>
+        <p><strong>Race:</strong> {match['race']}</p>
+        <p><strong>Nationality:</strong> {match['nationality']}</p>
+        <p><strong>Strength:</strong> {match['strength']}</p>
+        <p><strong>Weakness:</strong> {match['weakness']}</p>
+        <p><strong>Psychology:</strong> {match['psychology']}</p>
+        <p><strong>Hobby:</strong> {match['hobby']}</p>
+        <p><strong>Siblings:</strong> {match['siblings']}</p>
+        """
+        pdf_data = convert_html_to_pdf(pdf_html)
+        if pdf_data:
+            st.download_button(
+                label="📄 Download Card as PDF",
+                data=pdf_data,
+                file_name=f"persona_{search_query}.pdf",
+                mime="application/pdf"
+            )
     else:
         st.sidebar.warning("Character tidak ditemukan.")
 
@@ -98,28 +156,10 @@ with st.form("persona_form"):
 
     submitted = st.form_submit_button("Buat Card")
 
-def convert_html_to_pdf(source_html):
-    result = BytesIO()
-    pisa_status = pisa.CreatePDF(source_html, dest=result)
-    if not pisa_status.err:
-        return result.getvalue()
-    return None
-
 if submitted:
-    if not fan_name:
-        st.warning("Nama Fan Dalam App wajib diisi.")
-    elif fan_name in persona_db:
+    if fan_name in persona_db:
         st.warning(f"Character dengan nama fan '{fan_name}' sudah ada dalam database.")
     else:
-        # Save image temporarily if exists
-        img_path = None
-        if photo:
-            image = Image.open(photo)
-            img_path = f"temp_{fan_name}.png"
-            image.save(img_path)
-        else:
-            image = None
-
         persona_data = {
             "name": name,
             "age": age,
@@ -142,10 +182,14 @@ if submitted:
 
         col1, col2 = st.columns([1, 2])
 
-        if image:
+        if photo:
+            image = Image.open(photo)
             col1.image(image, width=200)
+            img_path = f"temp_{fan_name}.png"
+            image.save(img_path)
         else:
             col1.image("https://via.placeholder.com/200", width=200)
+            img_path = None
 
         html_card = f"""
         <div class='card'>
@@ -162,14 +206,11 @@ if submitted:
         <p><strong>Keluarga (Siblings):</strong> {siblings}</p>
         </div>
         """
-        col2.markdown(html_card, unsafe_allow_html=True)
 
-        # Prepare img tag for PDF
-        img_tag = f'<img src="{img_path}" width="200"/>' if img_path else ""
+        col2.markdown(html_card, unsafe_allow_html=True)
 
         pdf_html = f"""
         <h1>{name}</h1>
-        {img_tag}
         <p><strong>Fan Name:</strong> {fan_name}</p>
         <p><strong>Age:</strong> {age}</p>
         <p><strong>Occupation:</strong> {occupation}</p>
@@ -190,10 +231,6 @@ if submitted:
                 file_name=f"persona_{fan_name}.pdf",
                 mime="application/pdf"
             )
-
-        # Cleanup temporary image file
-        if img_path and Path(img_path).exists():
-            Path(img_path).unlink()
 
 st.markdown("""
     <hr>
