@@ -95,6 +95,10 @@ def simpan_ke_sheet(data_dict):
 # Cari data berdasarkan Fan Name
 def cari_persona(fan_name):
     df = pd.DataFrame(sheet.get_all_records())
+    if 'fan_name' not in df.columns:
+        st.error("❌ Kolom 'fan_name' tidak ditemukan di Google Sheet.")
+        st.write("Kolom yang tersedia:", df.columns.tolist())
+        return None
     if fan_name in df['fan_name'].values:
         data = df[df['fan_name'] == fan_name].iloc[0].to_dict()
         return data
