@@ -1,9 +1,11 @@
 import streamlit as st
 from PIL import Image
 import os
-import json
 from io import BytesIO
 from xhtml2pdf import pisa
+import gspread
+import pandas as pd
+from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(page_title="Persona Builder Card", layout="centered")
 
@@ -63,46 +65,54 @@ st.markdown(f"""
 
 st.title("🧬 Persona Builder Card")
 
-# Load database if exists
-DB_FILE = "persona_db.json"
-if os.path.exists(DB_FILE):
-    with open(DB_FILE, "r") as f:
-        persona_db = json.load(f)
-else:
-    persona_db = {}
+# Inisialisasi koneksi ke Google Sheets
+def init_gsheet():
+    scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("persona_builder_db").sheet1
+    return sheet
 
-# PDF converter function
-def convert_html_to_pdf(source_html):
-    result = BytesIO()
-    pisa_status = pisa.CreatePDF(source_html, dest=result)
-    if not pisa_status.err:
-        return result.getvalue()
+sheet = init_gsheet()
+
+# Simpan data ke Sheet
+def simpan_ke_sheet(data_dict):
+    values = [
+        data_dict["fan_name"],
+        data_dict["name"],
+        data_dict["age"],
+        data_dict["occupation"],
+        data_dict["race"],
+        data_dict["nationality"],
+        data_dict["strength"],
+        data_dict["weakness"],
+        data_dict["psychology"],
+        data_dict["hobby"],
+        data_dict["siblings"]
+    ]
+    sheet.append_row(values)
+
+# Cari data berdasarkan Fan Name
+def cari_persona(fan_name):
+    df = pd.DataFrame(sheet.get_all_records())
+    if fan_name in df['fan_name'].values:
+        data = df[df['fan_name'] == fan_name].iloc[0].to_dict()
+        return data
     return None
 
 # Search existing personas
-with st.sidebar.form("search_form"):
-    st.markdown("### 🔍 Cari Character")
-    search_query = st.text_input("Masukkan Nama Fan Dalam App")
-    search_submit = st.form_submit_button("Cari")
-
-if search_submit:
-    match = persona_db.get(search_query)
+st.sidebar.markdown("### 🔍 Cari Character")
+search_query = st.sidebar.text_input("Masukkan nama")
+if search_query:
+    match = cari_persona(search_query)
     if match:
         st.sidebar.success("Character ditemukan!")
-        st.subheader("🪪 Persona Card")
-
-        col1, col2 = st.columns([1, 2])
-        image_path = f"temp_{search_query}.png"
-        if os.path.exists(image_path):
-            image = Image.open(image_path)
-            col1.image(image, width=200)
-        else:
-            col1.image("https://via.placeholder.com/200", width=200)
-
-        html_card = f"""
+        st.sidebar.json(match)
+        st.subheader("🪪 Persona Card Ditemukan")
+        st.markdown(f"""
         <div class='card'>
         <h2>{match['name']}</h2>
-        <p><strong>Fan Name (App):</strong> {search_query}</p>
+        <p><strong>Fan Name (App):</strong> {match['fan_name']}</p>
         <p><strong>Usia:</strong> {match['age']}</p>
         <p><strong>Occupation:</strong> {match['occupation']}</p>
         <p><strong>Race:</strong> {match['race']}</p>
@@ -113,12 +123,18 @@ if search_submit:
         <p><strong>Hobby:</strong> {match['hobby']}</p>
         <p><strong>Keluarga (Siblings):</strong> {match['siblings']}</p>
         </div>
-        """
-        col2.markdown(html_card, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+        def convert_html_to_pdf(source_html):
+            result = BytesIO()
+            pisa_status = pisa.CreatePDF(source_html, dest=result)
+            if not pisa_status.err:
+                return result.getvalue()
+            return None
 
         pdf_html = f"""
         <h1>{match['name']}</h1>
-        <p><strong>Fan Name:</strong> {search_query}</p>
+        <p><strong>Fan Name:</strong> {match['fan_name']}</p>
         <p><strong>Age:</strong> {match['age']}</p>
         <p><strong>Occupation:</strong> {match['occupation']}</p>
         <p><strong>Race:</strong> {match['race']}</p>
@@ -129,12 +145,13 @@ if search_submit:
         <p><strong>Hobby:</strong> {match['hobby']}</p>
         <p><strong>Siblings:</strong> {match['siblings']}</p>
         """
+
         pdf_data = convert_html_to_pdf(pdf_html)
         if pdf_data:
             st.download_button(
                 label="📄 Download Card as PDF",
                 data=pdf_data,
-                file_name=f"persona_{search_query}.pdf",
+                file_name=f"persona_{match['fan_name']}.pdf",
                 mime="application/pdf"
             )
     else:
@@ -157,10 +174,12 @@ with st.form("persona_form"):
     submitted = st.form_submit_button("Buat Card")
 
 if submitted:
-    if fan_name in persona_db:
-        st.warning(f"Character dengan nama fan '{fan_name}' sudah ada dalam database.")
+    existing = cari_persona(fan_name)
+    if existing:
+        st.warning(f"Character dengan fan name '{fan_name}' sudah ada.")
     else:
         persona_data = {
+            "fan_name": fan_name,
             "name": name,
             "age": age,
             "occupation": occupation,
@@ -172,11 +191,9 @@ if submitted:
             "hobby": hobby,
             "siblings": siblings
         }
-        persona_db[fan_name] = persona_data
-        with open(DB_FILE, "w") as f:
-            json.dump(persona_db, f, indent=2)
+        simpan_ke_sheet(persona_data)
+        st.success("Card berhasil disimpan ke Google Sheets.")
 
-        st.success("Card berhasil dibuat dan disimpan.")
         st.markdown("---")
         st.subheader("🪪 Persona Card")
 
@@ -185,11 +202,8 @@ if submitted:
         if photo:
             image = Image.open(photo)
             col1.image(image, width=200)
-            img_path = f"temp_{fan_name}.png"
-            image.save(img_path)
         else:
             col1.image("https://via.placeholder.com/200", width=200)
-            img_path = None
 
         html_card = f"""
         <div class='card'>
@@ -208,6 +222,13 @@ if submitted:
         """
 
         col2.markdown(html_card, unsafe_allow_html=True)
+
+        def convert_html_to_pdf(source_html):
+            result = BytesIO()
+            pisa_status = pisa.CreatePDF(source_html, dest=result)
+            if not pisa_status.err:
+                return result.getvalue()
+            return None
 
         pdf_html = f"""
         <h1>{name}</h1>
