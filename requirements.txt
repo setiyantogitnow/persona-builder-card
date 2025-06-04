@@ -1,4 +1,6 @@
 streamlit
 pillow
-xhtml2pdf
 gspread
+oauth2client
+pandas
+xhtml2pdf
